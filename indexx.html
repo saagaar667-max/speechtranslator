@@ -1,0 +1,141 @@
+ <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign & Speech Translator</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f0f4f9; text-align: center; }
+    header { background: #4a90e2; color: white; padding: 15px; font-size: 1.5rem; }
+    .container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; padding: 20px; }
+    .card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.15); width: 450px; }
+    video, canvas { width: 100%; border-radius: 12px; border: 2px solid #4a90e2; }
+    button { margin: 8px; padding: 10px 18px; font-size: 1rem; border: none; border-radius: 8px; cursor: pointer; background: #4a90e2; color: white; }
+    button:hover { background: #357abd; }
+    .output { font-size: 1.3rem; margin-top: 10px; min-height: 40px; color: #222; }
+    .sentence { font-size: 1.6rem; font-weight: bold; margin-top: 10px; color: #111; }
+    footer { margin-top: 20px; background: #333; color: white; padding: 10px; }
+    #quote { margin-top: 15px; font-style: italic; font-size: 1.1rem; color: #555; }
+  </style>
+</head>
+<body>
+  <header>🌍 Sign & Speech Translator</header>
+
+  <div class="container">
+    <!-- SPEECH TO TEXT -->
+    <div class="card">
+      <h2>🎤 Speech → Text (for Deaf)</h2>
+      <button onclick="startListening()">Start Listening</button>
+      <button onclick="stopListening()">Stop</button>
+      <div id="speechOutput" class="output">Click start & speak...</div>
+    </div>
+
+    <!-- SIGN TO TEXT + SPEECH -->
+    <div class="card">
+      <h2>🤟 Sign → Text & Speech (for Mute)</h2>
+      <video id="webcam" autoplay playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div id="wordOutput" class="output">Show a gesture...</div>
+      <div id="sentenceOutput" class="sentence"></div>
+      <button onclick="toggleSpeech()">🔊 Toggle Speech</button>
+      <button onclick="clearSentence()">🗑 Clear</button>
+    </div>
+  </div>
+
+  <div id="quote"></div>
+  <footer>Made with ❤️ for an Inclusive Society</footer>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    // ---------- MOTIVATIONAL QUOTES ----------
+    const quotes = [
+      "🌟 Communication is the bridge to understanding.",
+      "🤝 Every voice matters, spoken or signed.",
+      "💡 Technology can break barriers.",
+      "❤️ Inclusion is our responsibility.",
+      "✨ Together, we can make silence heard."
+    ];
+    let qIndex = 0;
+    setInterval(() => {
+      document.getElementById('quote').textContent = quotes[qIndex];
+      qIndex = (qIndex + 1) % quotes.length;
+    }, 4000);
+
+    // ---------- SPEECH TO TEXT ----------
+    let recognition;
+    const speechOutput = document.getElementById('speechOutput');
+    function startListening() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) { alert("Your browser does not support SpeechRecognition. Use Chrome."); return; }
+      recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.onresult = (event) => {
+        let transcript = event.results[event.results.length - 1][0].transcript;
+        speechOutput.textContent = transcript;
+      };
+      recognition.onerror = (event) => speechOutput.textContent = "Error: " + event.error;
+      recognition.start();
+      speechOutput.textContent = "Listening...";
+    }
+    function stopListening() { if (recognition) recognition.stop(); speechOutput.textContent = "Stopped."; }
+
+    // ---------- SIGN TO TEXT ----------
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const wordOutput = document.getElementById('wordOutput');
+    const sentenceOutput = document.getElementById('sentenceOutput');
+    let sentence = "", lastGesture = "", lastTime = Date.now(), speechEnabled = false;
+
+    function toggleSpeech() { speechEnabled = !speechEnabled; alert("Speech: " + (speechEnabled ? "ON" : "OFF")); }
+    function clearSentence() { sentence = ""; sentenceOutput.textContent = ""; }
+
+    const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    hands.setOptions({ maxNumHands: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => await hands.send({ image: videoElement }),
+      width: 480, height: 360
+    });
+    camera.start();
+
+    function onResults(results) {
+      canvasElement.width = videoElement.videoWidth;
+      canvasElement.height = videoElement.videoHeight;
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        for (const landmarks of results.multiHandLandmarks) {
+          drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#00FF00', lineWidth: 2});
+          drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 1});
+        }
+        const gesture = recognizeGesture(results.multiHandLandmarks[0]);
+        if (gesture && gesture !== lastGesture && Date.now() - lastTime > 1500) {
+          wordOutput.textContent = gesture;
+          sentence += gesture + " ";
+          sentenceOutput.textContent = sentence;
+          if (speechEnabled) speak(gesture);
+          lastGesture = gesture; lastTime = Date.now();
+        }
+      }
+    }
+
+    // VERY simple rule-based gestures
+    function recognizeGesture(lm) {
+      const [thumb, index, middle, ring, pinky] = [lm[4], lm[8], lm[12], lm[16], lm[20]];
+      if (thumb.y < index.y && thumb.y < middle.y && thumb.y < ring.y && thumb.y < pinky.y) return "YES 👍";
+      if (index.y < lm[5].y && middle.y < lm[9].y && ring.y < lm[13].y && pinky.y < lm[17].y) return "HELLO 👋";
+      if (index.y > lm[6].y && middle.y > lm[10].y && ring.y > lm[14].y && pinky.y > lm[18].y) return "NO ✊";
+      if (index.y < lm[6].y && middle.y < lm[10].y && ring.y > lm[14].y && pinky.y > lm[18].y) return "PEACE ✌️";
+      return null;
+    }
+
+    function speak(text) { window.speechSynthesis
